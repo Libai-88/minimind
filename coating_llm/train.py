@@ -166,8 +166,8 @@ def main():
     out = os.path.join(HERE, "out")
     best = os.path.join(out, "sft", "coating_best.pt")
     if args.phase in ("pretrain", "all"):
-        model = CoatingLLM(vocab_size=10000, hidden=256, layers=4, heads=4, kv_heads=2,
-                           intermediate=640, max_seq=1024, dropout=0.1)
+        model = CoatingLLM(vocab_size=10000, hidden=384, layers=6, heads=8, kv_heads=4,
+                           intermediate=1024, max_seq=1024, dropout=0.1)
         ds = PretrainDataset(os.path.join(HERE, "dataset", "pretrain_coating.jsonl"), 512)
         run_phase(model, ds, collate_pre, args.pretrain_epochs, 3e-4, args.batch_size,
                   os.path.join(out, "pretrain"), "pretrain",
@@ -176,8 +176,8 @@ def main():
     else:
         init = args.init or os.path.join(out, "pretrain", "coating_pre_best.pt")
     if args.phase in ("sft", "all"):
-        model = CoatingLLM(vocab_size=10000, hidden=256, layers=4, heads=4, kv_heads=2,
-                           intermediate=640, max_seq=1024, dropout=0.0)
+        model = CoatingLLM(vocab_size=10000, hidden=384, layers=6, heads=8, kv_heads=4,
+                           intermediate=1024, max_seq=1024, dropout=0.0)
         model.load_state_dict(torch.load(init, map_location="cpu", weights_only=True))
         ds = SFTDataset(args.sft_data, 1024)
         run_phase(model, ds, collate_sft, args.sft_epochs, args.sft_lr, args.batch_size,

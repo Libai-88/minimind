@@ -55,7 +55,10 @@ def main():
     corpus = domain_texts()
     print(f"语料: {len(corpus)} 段, 共 {sum(len(t) for t in corpus)} 字符")
     tok = Tokenizer(models.BPE(unk_token=None))
-    tok.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+    tok.pre_tokenizer = pre_tokenizers.Sequence([
+        pre_tokenizers.Digits(individual_digits=True),
+        pre_tokenizers.ByteLevel(add_prefix_space=False),
+    ])
     tok.decoder = decoders.ByteLevel()
     trainer = trainers.BpeTrainer(
         vocab_size=10000 - 3,
@@ -68,11 +71,15 @@ def main():
     tok.save(OUT)
     for probe in ["<|im_start|>user\n什么是T弯？<|im_end|>",
                   "环氧酚醛样本R01-01：IR190 66%、RF516 2.61%，烘烤200°C×10min，MEK擦拭2次、水煮4级",
-                  "交联密度决定耐溶剂性：酚醛比例越高，MEK擦拭次数越多，T弯数值越大（变脆）。"]:
+                  "交联密度决定耐溶剂性：酚醛比例越高，MEK擦拭次数越多，T弯数值越大（变脆）。",
+                  "0.85 1.4e-3 550 205"]:
         ids = tok.encode(probe).ids
         rt = tok.decode(ids, skip_special_tokens=False)
         assert rt == probe, f"往返不一致: {rt!r}"
         print(f"[OK] {len(probe)}字 -> {len(ids)} tokens: {probe[:40]}")
+    multi_digit = [t for t, i in tok.get_vocab().items() if t.isdigit() and len(t) > 1]
+    assert not multi_digit, f"存在多位数字合并token: {multi_digit[:8]}"
+    print("数字均为单token: OK")
     print(f"词表 {tok.get_vocab_size()}，已保存 {OUT}")
 
 

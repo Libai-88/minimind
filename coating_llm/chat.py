@@ -65,8 +65,8 @@ def main():
     args = ap.parse_args()
 
     tok = Tokenizer.from_file(os.path.join(HERE, "model", "tokenizer.json"))
-    model = CoatingLLM(vocab_size=10000, hidden=256, layers=4, heads=4, kv_heads=2,
-                       intermediate=640, max_seq=1024, dropout=0.0)
+    model = CoatingLLM(vocab_size=10000, hidden=384, layers=6, heads=8, kv_heads=4,
+                       intermediate=1024, max_seq=1024, dropout=0.0)
     w = find_weight()
     model.load_state_dict(torch.load(w, map_location="cpu", weights_only=True))
     model.eval()
