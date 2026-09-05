@@ -2,15 +2,22 @@
 """涂釉 Web 对话服务：浏览器人工测试入口(仅本机使用)。"""
 import json
 import os
+import re
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import torch
 from tokenizers import Tokenizer
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT + "/coating_ai")
+
 from model import CoatingLLM
 from chat import chat_once
+from data import mat_lib
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+mlib = mat_lib()
 PORT = 8000
 torch.set_num_threads(3)
 
@@ -61,7 +68,7 @@ PAGE = """<!DOCTYPE html>
 </div>
 <div class="bar">
   <textarea id="q" placeholder="输入问题，回车发送…"></textarea>
-  <span class="temp">温度<input type="range" id="temp" min="0" max="100" value="50" style="width:90px"><span id="tempv">0.5</span></span>
+  <span class="temp">温度(0=最稳)<input type="range" id="temp" min="0" max="100" value="0" style="width:90px"><span id="tempv">0.0</span></span>
   <button id="send" onclick="send()">发送</button>
 </div>
 <script>
@@ -102,10 +109,39 @@ async function send() {
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 qEl.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
-add('bot', '你好，我是涂釉，涂料领域的配方性能小专家。可以让我分析配方、推断新配方性能、讲机理、查原料档案。左侧按钮是一些常用问法。');
+add('bot', '你好，我是涂釉，涂料领域的配方性能小专家。单轮问答模式：每个问题请写全上下文（体系、组成、烘烤、问题）。新配方推断中，组成占比由原料库实时计算校正，机理量、历史引用、区间和建议由模型生成。左侧按钮是一些常用问法。');
 </script>
 </body>
 </html>"""
+
+
+def ground_roles(q, ans):
+    """把回答中的组成角色占比替换为按原料库实时计算的真值(确定性部分不由模型口算)。"""
+    m = re.search(r"体系[，,]\s*(.+?)，\s*烘烤", q)
+    if not m:
+        return ans
+    comp = {}
+    for part in m.group(1).split("、"):
+        mm = re.match(r"(.+?)\s*([\d.]+)\s*%", part.strip())
+        if mm and mm.group(1).strip() in mlib:
+            comp[mm.group(1).strip()] = float(mm.group(2))
+    if not comp:
+        return ans
+    total = sum(comp.values())
+    roles = {"树脂": 0.0, "固化剂": 0.0, "溶剂": 0.0, "助剂": 0.0, "颜料": 0.0}
+    for k, v in comp.items():
+        r = mlib[k].get("role")
+        if r in roles:
+            roles[r] += v / total * 100
+    truth = ", ".join(f"{r}占{p:.1f}%" for r, p in roles.items() if p > 0.1)
+    if "新配方：" not in ans:
+        return ans
+    head, rest = ans.split("新配方：", 1)
+    for anchor in ("，酚羟基/环氧当量比", "，NCO/OH当量比", "，有效交联密度"):
+        if anchor in rest:
+            body, tail = rest.split(anchor, 1)
+            return head + "新配方：" + truth + anchor + tail
+    return ans
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -127,15 +163,15 @@ class Handler(BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length", 0))
             req = json.loads(self.rfile.read(n).decode("utf-8"))
             q = str(req.get("q", "")).strip()
-            hist_in = [(str(p[0]), str(p[1])) for p in req.get("history", [])[-3:]]
-            temp = min(max(float(req.get("temperature", 0.5)), 0.01), 1.0)
+            temp = min(max(float(req.get("temperature", 0.01)), 0.01), 1.0)
             if not q:
                 self._send(400, json.dumps({"error": "问题为空"}).encode("utf-8"),
                            "application/json; charset=utf-8")
                 return
-            ans = chat_once(model, tok, q, history=hist_in, temperature=temp,
-                            top_p=0.9, top_k=30, repetition_penalty=1.05,
+            ans = chat_once(model, tok, q, history=(), temperature=temp,
+                            top_p=0.9, top_k=10, repetition_penalty=1.05,
                             max_new_tokens=400)
+            ans = ground_roles(q, ans)
             self._send(200, json.dumps({"a": ans}, ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
         except Exception as e:
